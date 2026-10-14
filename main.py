@@ -240,7 +240,10 @@ def build_video(slides_data: list) -> Path:
         generate_tts(text, audio_path)
 
         audio_clip = AudioFileClip(str(audio_path))
-        audio_clip = audio_clip.speedx(2.0)
+        # Ускоряем ×2 через ffmpeg
+        sped_path = TEMP_DIR / f"audio_fast_{i:02d}.mp3"
+        os.system(f'ffmpeg -y -i "{audio_path}" -filter:a "atempo=2.0" "{sped_path}"')
+        audio_clip = AudioFileClip(str(sped_path))
         duration = audio_clip.duration
 
         image_clip = ImageClip(str(img_path), duration=duration)
