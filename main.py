@@ -83,7 +83,7 @@ def generate_script(topic: str) -> list:
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.55,
-        "max_tokens": 2000,
+        "max_tokens": 4000,
         "stream": False,
     }
 
@@ -106,8 +106,8 @@ def generate_script(topic: str) -> list:
 
     try:
         slides = json.loads(text)
-        if not isinstance(slides, list) or len(slides) < 6:
-            raise ValueError("Слишком мало слайдов")
+        if not isinstance(slides, list) or len(slides) < 4:
+            raise ValueError(f"Слишком мало слайдов: {len(slides)}")
         return slides[:8]
     except Exception as e:
         log(f"Ошибка парсинга ответа Agnes: {e}\nОтвет: {text[:500]}")
