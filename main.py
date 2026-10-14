@@ -150,11 +150,24 @@ def create_slide_image(bg_path: Path, text: str, out_path: Path):
     img = img.resize((VIDEO_WIDTH, VIDEO_HEIGHT), Image.Resampling.LANCZOS)
 
     draw = ImageDraw.Draw(img, "RGBA")
-    try:
-        font = ImageFont.truetype(FONT_PATH, 60)
-    except Exception:
+
+    font = None
+    font_candidates = [
+        FONT_PATH,
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    ]
+    for fp in font_candidates:
+        try:
+            font = ImageFont.truetype(fp, 60)
+            log(f"Шрифт загружен: {fp}")
+            break
+        except Exception:
+            continue
+    if font is None:
         font = ImageFont.load_default()
-        log("Шрифт не найден, используем стандартный")
+        log("Шрифт не найден, используем стандартный (может не поддерживать кириллицу)")
 
     margin = 40
     text_bbox = draw.textbbox((0, 0), text, font=font)
