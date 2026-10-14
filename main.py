@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Контент-завод: генерация видео о фасадных панелях.
+Контент-завод: вертикальные видео о фасадных панелях + ускорение ×2 + тихая музыка.
 """
 import json
 import os
@@ -11,12 +11,19 @@ from pathlib import Path
 
 import requests
 from gtts import gTTS
-from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
+from moviepy.editor import (
+    AudioFileClip,
+    ImageClip,
+    CompositeAudioClip,
+    concatenate_videoclips,
+    afx,
+)
 from PIL import Image, ImageDraw, ImageFont
 
 from config import (
     PEXELS_API_KEY,
     FONT_PATH,
+    MUSIC_PATH,
     VIDEO_WIDTH,
     VIDEO_HEIGHT,
     FPS,
@@ -50,7 +57,6 @@ def get_next_lesson(plan):
 
 
 def generate_script(topic: str) -> list:
-    """Agnes 2.5 Flash → список слайдов [{text, keywords}]"""
     key = os.getenv("AGNES_API_KEY")
     if not key:
         raise RuntimeError("AGNES_API_KEY не задан")
@@ -65,13 +71,13 @@ def generate_script(topic: str) -> list:
 
 Верни ТОЛЬКО валидный JSON-массив объектов вида:
 [
-  {{"text": "Краткий текст слайда (1-2 предложения, до 120 символов)", "keywords": "english keywords for stock photo, 2-4 words"}},
+  {{"text": "Краткий текст слайда (1-2 предложения, до 100 символов)", "keywords": "english keywords for stock photo, 2-4 words"}},
   ...
 ]
 
 Требования:
 - Текст на русском, простой и понятный.
-- keywords — на английском, подходящие для поиска фото на Pexels (фасады домов, панели, строительство).
+- keywords — на английском, подходящие для поиска фото на Pexels.
 - Не более 8 слайдов.
 - Никакого дополнительного текста вне JSON.
 """
@@ -123,7 +129,7 @@ def download_pexels_photo(keywords: str) -> Path:
     params = {
         "query": keywords,
         "per_page": 5,
-        "orientation": "landscape",
+        "orientation": "portrait",
         "size": "large",
     }
     log(f"Поиск фото на Pexels: {keywords}")
@@ -145,13 +151,11 @@ def download_pexels_photo(keywords: str) -> Path:
 
 
 def create_slide_image(bg_path: Path, text: str, out_path: Path):
-    """Накладывает текст на фото с полупрозрачной подложкой."""
     img = Image.open(bg_path).convert("RGB")
     img = img.resize((VIDEO_WIDTH, VIDEO_HEIGHT), Image.Resampling.LANCZOS)
 
-    draw = ImageDraw.Draw(img, "RGBA")
-
     font = None
+    font_size = 52
     font_candidates = [
         FONT_PATH,
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -160,37 +164,55 @@ def create_slide_image(bg_path: Path, text: str, out_path: Path):
     ]
     for fp in font_candidates:
         try:
-            font = ImageFont.truetype(fp, 60)
-            log(f"Шрифт загружен: {fp}")
+            font = ImageFont.truetype(fp, font_size)
             break
         except Exception:
             continue
     if font is None:
         font = ImageFont.load_default()
-        log("Шрифт не найден, используем стандартный (может не поддерживать кириллицу)")
 
+    max_width = VIDEO_WIDTH - 100
+    words = text.split()
+    lines = []
+    current = ""
+    draw_temp = ImageDraw.Draw(img)
+    for word in words:
+        test = (current + " " + word).strip()
+        bbox = draw_temp.textbbox((0, 0), test, font=font)
+        if bbox[2] - bbox[0] <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+
+    line_height = font_size + 12
+    text_h = len(lines) * line_height
     margin = 40
-    text_bbox = draw.textbbox((0, 0), text, font=font)
-    text_w = text_bbox[2] - text_bbox[0]
-    text_h = text_bbox[3] - text_bbox[1]
-    box_w = min(text_w + margin * 2, VIDEO_WIDTH - 80)
     box_h = text_h + margin * 2
-    box_x = (VIDEO_WIDTH - box_w) // 2
-    box_y = VIDEO_HEIGHT - box_h - 60
+    box_w = VIDEO_WIDTH - 60
+    box_x = 30
+    box_y = VIDEO_HEIGHT - box_h - 80
 
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     overlay_draw = ImageDraw.Draw(overlay)
     overlay_draw.rounded_rectangle(
         [box_x, box_y, box_x + box_w, box_y + box_h],
         radius=20,
-        fill=(0, 0, 0, 160),
+        fill=(0, 0, 0, 170),
     )
     img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
     draw = ImageDraw.Draw(img)
 
-    text_x = box_x + (box_w - text_w) // 2
-    text_y = box_y + (box_h - text_h) // 2
-    draw.text((text_x, text_y), text, font=font, fill=(255, 255, 255))
+    y = box_y + margin
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=font)
+        line_w = bbox[2] - bbox[0]
+        x = box_x + (box_w - line_w) // 2
+        draw.text((x, y), line, font=font, fill=(255, 255, 255))
+        y += line_height
 
     img.save(out_path, "JPEG", quality=90)
     return out_path
@@ -218,13 +240,27 @@ def build_video(slides_data: list) -> Path:
         generate_tts(text, audio_path)
 
         audio_clip = AudioFileClip(str(audio_path))
+        audio_clip = audio_clip.fx(afx.speedx, 2.0)
         duration = audio_clip.duration
+
         image_clip = ImageClip(str(img_path), duration=duration)
         video_clip = image_clip.set_audio(audio_clip)
         clips.append(video_clip)
 
     log("Склейка клипов...")
     final = concatenate_videoclips(clips, method="compose")
+
+    if Path(MUSIC_PATH).exists():
+        log("Добавляем фоновую музыку...")
+        music = AudioFileClip(MUSIC_PATH)
+        if music.duration < final.duration:
+            music = afx.audio_loop(music, duration=final.duration)
+        else:
+            music = music.subclip(0, final.duration)
+        music = music.volumex(0.12)
+        final_audio = CompositeAudioClip([final.audio, music])
+        final = final.set_audio(final_audio)
+
     final.write_videofile(
         str(OUTPUT_VIDEO),
         fps=FPS,
@@ -241,11 +277,10 @@ def build_video(slides_data: list) -> Path:
 
 
 def compress_video(src: Path) -> Path:
-    """Сжатие через FFmpeg до ~45 МБ."""
     compressed = Path("output_compressed.mp4")
     cmd = (
-        f'ffmpeg -y -i "{src}" -vf scale=1280:720 -c:v libx264 -b:v 1200k '
-        f'-c:a aac -b:a 128k -movflags +faststart "{compressed}"'
+        f'ffmpeg -y -i "{src}" -vf scale={VIDEO_WIDTH}:{VIDEO_HEIGHT} '
+        f'-c:v libx264 -b:v 1500k -c:a aac -b:a 128k -movflags +faststart "{compressed}"'
     )
     log("Сжатие видео...")
     ret = os.system(cmd)
