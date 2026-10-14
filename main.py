@@ -261,7 +261,7 @@ def build_video(slides_data: list) -> Path:
                 music = afx.audio_loop(music, duration=final.duration)
             else:
                 music = music.subclip(0, final.duration)
-            music = music.volumex(0.08)
+            music = music.volumex(0.03)
             final_audio = CompositeAudioClip([final.audio, music])
             final = final.set_audio(final_audio)
         except Exception as e:
