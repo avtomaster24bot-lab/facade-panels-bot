@@ -240,7 +240,7 @@ def build_video(slides_data: list) -> Path:
         generate_tts(text, audio_path)
 
         audio_clip = AudioFileClip(str(audio_path))
-        audio_clip = audio_clip.fx(afx.speedx, 2.0)
+        audio_clip = audio_clip.speedx(2.0)
         duration = audio_clip.duration
 
         image_clip = ImageClip(str(img_path), duration=duration)
