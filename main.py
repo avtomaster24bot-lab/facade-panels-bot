@@ -9,14 +9,12 @@ import sys
 import traceback
 from pathlib import Path
 
-import google.generativeai as genai
 import requests
 from gtts import gTTS
 from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
 from PIL import Image, ImageDraw, ImageFont
 
 from config import (
-    GEMINI_API_KEY,
     PEXELS_API_KEY,
     FONT_PATH,
     VIDEO_WIDTH,
@@ -52,19 +50,18 @@ def get_next_lesson(plan):
 
 
 def generate_script(topic: str) -> list:
-    """Gemini 1.5 Flash → список слайдов [{text, keywords}]"""
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY не задан")
+    """Agnes 2.5 Flash → список слайдов [{text, keywords}]"""
+    key = os.getenv("AGNES_API_KEY")
+    if not key:
+        raise RuntimeError("AGNES_API_KEY не задан")
 
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-2.5-flash")
-
+    url = "https://apihub.agnes-ai.com/v1/chat/completions"
     prompt = f"""
 Ты — эксперт по строительству и фасадным материалам.
 Тема видео: «{topic}».
 
 Сгенерируй сценарий из 6–8 коротких слайдов для образовательного видео.
-Каждый слайд — это один кадр с текстом на экране и озвучкой.
+Каждый слайд — один кадр с текстом на экране и озвучкой.
 
 Верни ТОЛЬКО валидный JSON-массив объектов вида:
 [
@@ -74,26 +71,46 @@ def generate_script(topic: str) -> list:
 
 Требования:
 - Текст на русском, простой и понятный.
-- keywords — на английском, подходящие для поиска фото на Pexels (фасады домов, панели, строительство, материалы).
+- keywords — на английском, подходящие для поиска фото на Pexels (фасады домов, панели, строительство).
 - Не более 8 слайдов.
 - Никакого дополнительного текста вне JSON.
 """
-    log(f"Запрос сценария к Gemini по теме: {topic}")
-    response = model.generate_content(prompt)
-    text = response.text.strip()
-    # Иногда Gemini оборачивает в ```json
+
+    payload = {
+        "model": "agnes-2.5-flash",
+        "messages": [
+            {"role": "system", "content": "Ты генерируешь только валидный JSON."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.55,
+        "max_tokens": 2000,
+        "stream": False,
+    }
+
+    log(f"Запрос сценария к Agnes по теме: {topic}")
+    resp = requests.post(
+        url,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=120,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    text = data["choices"][0]["message"]["content"].strip()
+
     if text.startswith("```"):
         text = text.split("```")[1]
         if text.startswith("json"):
             text = text[4:]
     text = text.strip()
+
     try:
         slides = json.loads(text)
         if not isinstance(slides, list) or len(slides) < 6:
             raise ValueError("Слишком мало слайдов")
         return slides[:8]
     except Exception as e:
-        log(f"Ошибка парсинга ответа Gemini: {e}\nОтвет: {text[:500]}")
+        log(f"Ошибка парсинга ответа Agnes: {e}\nОтвет: {text[:500]}")
         raise
 
 
@@ -118,7 +135,6 @@ def download_pexels_photo(keywords: str) -> Path:
         raise RuntimeError(f"Фото по запросу '{keywords}' не найдены")
 
     photo = photos[0]
-    # Берём medium или large
     src = photo["src"].get("large") or photo["src"].get("medium") or photo["src"]["original"]
     img_path = TEMP_DIR / f"bg_{hash(keywords) % 100000}.jpg"
     r = requests.get(src, timeout=30)
@@ -140,7 +156,6 @@ def create_slide_image(bg_path: Path, text: str, out_path: Path):
         font = ImageFont.load_default()
         log("Шрифт не найден, используем стандартный")
 
-    # Подложка
     margin = 40
     text_bbox = draw.textbbox((0, 0), text, font=font)
     text_w = text_bbox[2] - text_bbox[0]
@@ -160,7 +175,6 @@ def create_slide_image(bg_path: Path, text: str, out_path: Path):
     img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
     draw = ImageDraw.Draw(img)
 
-    # Текст по центру подложки
     text_x = box_x + (box_w - text_w) // 2
     text_y = box_y + (box_h - text_h) // 2
     draw.text((text_x, text_y), text, font=font, fill=(255, 255, 255))
@@ -225,7 +239,6 @@ def compress_video(src: Path) -> Path:
     if ret != 0:
         log("Предупреждение: сжатие не удалось, используем оригинал")
         return src
-    # Заменяем
     src.unlink(missing_ok=True)
     compressed.rename(src)
     return src
@@ -251,12 +264,10 @@ def main():
         size_mb = video_path.stat().st_size / (1024 * 1024)
         log(f"Видео готово: {video_path} ({size_mb:.1f} МБ)")
 
-        # Помечаем как done
         lesson["done"] = True
         save_plan(plan)
         log("content_plan.json обновлён")
 
-        # Сохраняем тему для send_to_telegram
         with open("current_topic.txt", "w", encoding="utf-8") as f:
             f.write(topic)
 
