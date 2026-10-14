@@ -239,8 +239,7 @@ def build_video(slides_data: list) -> Path:
         audio_path = TEMP_DIR / f"audio_{i:02d}.mp3"
         generate_tts(text, audio_path)
 
-        audio_clip = AudioFileClip(str(audio_path))
-        # Ускоряем ×2 через ffmpeg
+        # Ускоряем озвучку ×2 через ffmpeg
         sped_path = TEMP_DIR / f"audio_fast_{i:02d}.mp3"
         os.system(f'ffmpeg -y -i "{audio_path}" -filter:a "atempo=2.0" "{sped_path}"')
         audio_clip = AudioFileClip(str(sped_path))
@@ -253,16 +252,20 @@ def build_video(slides_data: list) -> Path:
     log("Склейка клипов...")
     final = concatenate_videoclips(clips, method="compose")
 
+    # Тихая фоновая музыка
     if Path(MUSIC_PATH).exists():
-        log("Добавляем фоновую музыку...")
-        music = AudioFileClip(MUSIC_PATH)
-        if music.duration < final.duration:
-            music = afx.audio_loop(music, duration=final.duration)
-        else:
-            music = music.subclip(0, final.duration)
-        music = music.volumex(0.12)
-        final_audio = CompositeAudioClip([final.audio, music])
-        final = final.set_audio(final_audio)
+        log("Добавляем фоновую музыку (тише под голос)...")
+        try:
+            music = AudioFileClip(MUSIC_PATH)
+            if music.duration < final.duration:
+                music = afx.audio_loop(music, duration=final.duration)
+            else:
+                music = music.subclip(0, final.duration)
+            music = music.volumex(0.08)
+            final_audio = CompositeAudioClip([final.audio, music])
+            final = final.set_audio(final_audio)
+        except Exception as e:
+            log(f"Музыка не загрузилась ({e}), продолжаем без неё")
 
     final.write_videofile(
         str(OUTPUT_VIDEO),
