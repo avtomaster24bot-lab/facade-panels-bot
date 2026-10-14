@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Отправка готового видео в Telegram (как в рабочем репозитории)."""
+"""Отправка готового видео в Telegram."""
 import os
 import sys
 import asyncio
@@ -39,20 +39,17 @@ async def send():
     request = HTTPXRequest(connection_pool_size=1, read_timeout=120, write_timeout=120)
     bot = Bot(token=token, request=request)
 
-    try:
-        me = await bot.get_me()
-        log(f"Bot OK: @{me.username}")
+    me = await bot.get_me()
+    log(f"Bot OK: @{me.username}")
 
-        with open(VIDEO, "rb") as f:
-            await bot.send_video(
-                chat_id=chat_id,
-                video=f,
-                caption=caption[:1024],
-                supports_streaming=True,
-            )
-        log("Видео успешно отправлено")
-    finally:
-        await bot.session.close()
+    with open(VIDEO, "rb") as f:
+        await bot.send_video(
+            chat_id=chat_id,
+            video=f,
+            caption=caption[:1024],
+            supports_streaming=True,
+        )
+    log("Видео успешно отправлено")
 
 
 if __name__ == "__main__":
