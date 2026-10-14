@@ -57,7 +57,7 @@ def generate_script(topic: str) -> list:
         raise RuntimeError("GEMINI_API_KEY не задан")
 
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
 
     prompt = f"""
 Ты — эксперт по строительству и фасадным материалам.
